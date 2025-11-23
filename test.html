@@ -1,0 +1,462 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Wifi, 
+  Activity, 
+  Users, 
+  Settings, 
+  Shield, 
+  Smartphone, 
+  Laptop,
+  Moon,
+  Sun,
+  RefreshCw,
+  Lock,
+  Menu,
+  X,
+  Cable, 
+  MoreVertical,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Power
+} from 'lucide-react';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+
+// --- Types ---
+
+interface Client {
+  id: string;
+  ip: string;
+  mac: string;
+  name: string;
+  type: 'mobile' | 'desktop' | 'unknown';
+  connectionType: 'wifi' | 'usb';
+  dataUsed: string;
+  status: 'active' | 'blocked';
+}
+
+interface LogEntry {
+  id: number;
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
+
+// --- MD3 Components ---
+
+const SurfaceCard = ({ children, className = "", onClick }: { children: React.ReactNode; className?: string, onClick?: () => void }) => (
+  <div 
+    onClick={onClick}
+    className={`bg-white dark:bg-neutral-800 rounded-[28px] p-6 shadow-sm transition-all duration-200 ${className}`}
+  >
+    {children}
+  </div>
+);
+
+const IconButton = ({ icon: Icon, active = false, onClick, className = "" }: any) => (
+  <button 
+    onClick={onClick}
+    className={`p-4 rounded-full transition-colors duration-200 flex items-center justify-center
+      ${active 
+        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' 
+        : 'hover:bg-neutral-100 text-neutral-600 dark:hover:bg-neutral-700 dark:text-neutral-400'} 
+      ${className}`}
+  >
+    <Icon size={24} strokeWidth={2} />
+  </button>
+);
+
+const MD3Switch = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
+  <button
+    onClick={onChange}
+    className={`relative w-14 h-8 rounded-full transition-colors duration-200 ease-in-out border-2 
+      ${checked 
+        ? 'bg-blue-600 border-blue-600 dark:bg-blue-400 dark:border-blue-400' 
+        : 'bg-neutral-200 border-neutral-400 dark:bg-neutral-700 dark:border-neutral-500'}`}
+  >
+    <span
+      className={`absolute top-1/2 -translate-y-1/2 left-1 w-5 h-5 bg-white dark:bg-neutral-900 rounded-full shadow-md transition-transform duration-200 ease-in-out
+        ${checked ? 'translate-x-6 w-6 h-6' : 'translate-x-0'}`}
+    />
+  </button>
+);
+
+const Chip = ({ label, icon: Icon, active }: { label: string, icon?: any, active?: boolean }) => (
+  <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors
+    ${active 
+      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200' 
+      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-700/50 dark:text-neutral-400'}`}>
+    {Icon && <Icon size={16} />}
+    {label}
+  </div>
+);
+
+// --- Main Application ---
+
+export default function TetherControlPanel() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [isBroadcasting, setIsBroadcasting] = useState(true);
+  const [isUsbActive, setIsUsbActive] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [uptime, setUptime] = useState(0);
+
+  // --- Data States ---
+  const [trafficData, setTrafficData] = useState<any[]>([]);
+  // We use a Ref to store the 'current' speed so we can modify it incrementally
+  // rather than randomly generating new numbers every tick.
+  const trafficStateRef = useRef({ download: 1500, upload: 300 }); 
+
+  const [clients, setClients] = useState<Client[]>([
+    { id: '1', ip: '192.168.49.2', mac: 'AA:BB:CC:DD:EE:01', name: 'MacBook Pro (2015)', type: 'desktop', connectionType: 'wifi', dataUsed: '1.2 GB', status: 'active' },
+    { id: '2', ip: '192.168.42.129', mac: 'AA:BB:CC:DD:EE:05', name: 'Gaming PC', type: 'desktop', connectionType: 'usb', dataUsed: '4.5 GB', status: 'active' },
+    { id: '3', ip: '192.168.49.22', mac: 'AA:BB:CC:DD:EE:99', name: 'iPhone 13', type: 'mobile', connectionType: 'wifi', dataUsed: '150 MB', status: 'active' },
+  ]);
+
+  // --- Effects ---
+  useEffect(() => {
+    const timer = setInterval(() => setUptime(u => u + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+  }, [darkMode]);
+
+  // Smoothed Traffic Simulation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTrafficData(current => {
+        if (!isBroadcasting && !isUsbActive) {
+          // If everything is off, drop to zero
+          trafficStateRef.current = { download: 0, upload: 0 };
+        } else {
+          // 1. Get current values
+          let { download, upload } = trafficStateRef.current;
+
+          // 2. Random Walk: Change by small increments (-200 to +200 KB/s)
+          const downloadDelta = (Math.random() - 0.5) * 400; 
+          const uploadDelta = (Math.random() - 0.5) * 100;
+
+          download += downloadDelta;
+          upload += uploadDelta;
+
+          // 3. Occasional Burst (Simulate loading a page) - 5% chance
+          if (Math.random() > 0.95) {
+             download += (Math.random() * 3000) + 1000; // Spike
+          }
+
+          // 4. Natural Decay (If speed is high, tend to drop)
+          if (download > 8000) download *= 0.85;
+          if (upload > 2000) upload *= 0.9;
+          
+          // 5. Hard Limits (Min 0, Max 20MB/s)
+          download = Math.max(50, Math.min(download, 25000));
+          upload = Math.max(10, Math.min(upload, 5000));
+
+          // Save state for next tick
+          trafficStateRef.current = { download, upload };
+        }
+
+        const newPoint = {
+          time: new Date().toISOString(),
+          upload: Math.floor(trafficStateRef.current.upload),
+          download: Math.floor(trafficStateRef.current.download),
+        };
+        
+        const newData = [...current, newPoint];
+        if (newData.length > 20) newData.shift();
+        return newData;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isBroadcasting, isUsbActive]);
+
+  // --- Helpers ---
+  const formatUptime = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${h}h ${m}m`;
+  };
+
+  // --- Render Sections ---
+
+  const renderDashboard = () => (
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 animate-in fade-in duration-500">
+      
+      {/* Hero Status Card (Full Width) */}
+      <div className="md:col-span-8">
+        <SurfaceCard className="h-full flex flex-col justify-between relative overflow-hidden bg-blue-50 dark:bg-neutral-800 border-0">
+          <div className="relative z-10">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h2 className="text-3xl font-medium text-neutral-900 dark:text-neutral-100 tracking-tight">
+                  System Status
+                </h2>
+                <p className="text-neutral-500 dark:text-neutral-400 mt-1">
+                  Routing traffic via Mobile Data
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Chip label="Wi-Fi" icon={Wifi} active={isBroadcasting} />
+                <Chip label="USB" icon={Cable} active={isUsbActive} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-8 mt-8">
+              <div>
+                <p className="text-sm font-medium text-neutral-500 uppercase tracking-wider mb-1">Download</p>
+                <div className="flex items-baseline gap-1 text-blue-600 dark:text-blue-400">
+                  <span className="text-4xl font-normal">
+                    {(trafficData[trafficData.length-1]?.download / 1024).toFixed(1) || '0.0'}
+                  </span>
+                  <span className="text-lg font-medium">MB/s</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-500 uppercase tracking-wider mb-1">Upload</p>
+                <div className="flex items-baseline gap-1 text-emerald-600 dark:text-emerald-400">
+                  <span className="text-4xl font-normal">
+                    {(trafficData[trafficData.length-1]?.upload / 1024).toFixed(1) || '0.0'}
+                  </span>
+                  <span className="text-lg font-medium">MB/s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Decorative Graph Background */}
+          <div className="absolute -bottom-4 -right-4 w-2/3 h-48 opacity-10 pointer-events-none">
+             <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trafficData}>
+                <Area type="monotone" dataKey="download" stroke="#2563eb" fill="#2563eb" strokeWidth={4} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SurfaceCard>
+      </div>
+
+      {/* Quick Toggles (Right Column) */}
+      <div className="md:col-span-4 flex flex-col gap-6">
+        <SurfaceCard className="flex-1 flex flex-col justify-center">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 rounded-2xl">
+                <Wifi size={24} />
+              </div>
+              <div>
+                <p className="font-medium text-lg text-neutral-900 dark:text-neutral-100">Wi-Fi Direct</p>
+                <p className="text-xs text-neutral-500">SSID: TetherNet_5G</p>
+              </div>
+            </div>
+            <MD3Switch checked={isBroadcasting} onChange={() => setIsBroadcasting(!isBroadcasting)} />
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard className="flex-1 flex flex-col justify-center">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200 rounded-2xl">
+                <Cable size={24} />
+              </div>
+              <div>
+                <p className="font-medium text-lg text-neutral-900 dark:text-neutral-100">USB Tether</p>
+                <p className="text-xs text-neutral-500">Interface: rndis0</p>
+              </div>
+            </div>
+            {/* USB is read-only usually, so we show status indicator instead of switch */}
+            <div className={`w-3 h-3 rounded-full ${isUsbActive ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-neutral-300'}`} />
+          </div>
+        </SurfaceCard>
+      </div>
+
+      {/* Analytics Graph */}
+      <div className="md:col-span-12">
+        <SurfaceCard>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-medium text-neutral-900 dark:text-neutral-100">Traffic History</h3>
+            <div className="flex gap-4 text-sm">
+               <div className="flex items-center gap-2">
+                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                 <span className="text-neutral-600 dark:text-neutral-400">Download</span>
+               </div>
+               <div className="flex items-center gap-2">
+                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                 <span className="text-neutral-600 dark:text-neutral-400">Upload</span>
+               </div>
+            </div>
+          </div>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trafficData}>
+                <defs>
+                  <linearGradient id="colorDown" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#404040" : "#e5e5e5"} />
+                <XAxis dataKey="time" hide />
+                <YAxis stroke={darkMode ? "#a3a3a3" : "#737373"} fontSize={12} tickLine={false} axisLine={false} />
+                <Tooltip 
+                  contentStyle={{ 
+                    borderRadius: '16px', 
+                    backgroundColor: darkMode ? '#262626' : '#fff',
+                    border: 'none',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                  }}
+                />
+                <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#colorDown)" strokeWidth={3} isAnimationActive={false} />
+                <Area type="monotone" dataKey="upload" stroke="#10b981" fill="url(#colorUp)" strokeWidth={3} isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </SurfaceCard>
+      </div>
+    </div>
+  );
+
+  const renderClientList = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {clients.map(client => (
+        <SurfaceCard key={client.id} className="relative group hover:shadow-md border-2 border-transparent hover:border-blue-100 dark:hover:border-blue-900/30">
+          <div className="flex justify-between items-start mb-4">
+             <div className={`p-3 rounded-2xl ${
+               client.connectionType === 'wifi' 
+                ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300' 
+                : 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-300'
+             }`}>
+                {client.connectionType === 'wifi' ? <Wifi size={20} /> : <Cable size={20} />}
+             </div>
+             <button className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
+               <MoreVertical size={20} />
+             </button>
+          </div>
+          
+          <h3 className="text-lg font-medium text-neutral-900 dark:text-neutral-100 mb-1">{client.name}</h3>
+          <p className="text-sm text-neutral-500 font-mono mb-6">{client.ip}</p>
+
+          <div className="flex items-center justify-between pt-4 border-t border-neutral-100 dark:border-neutral-700/50">
+             <div>
+                <p className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Usage</p>
+                <p className="text-neutral-700 dark:text-neutral-300 font-medium">{client.dataUsed}</p>
+             </div>
+             <button 
+                onClick={() => setClients(c => c.map(i => i.id === client.id ? {...i, status: i.status === 'active' ? 'blocked' : 'active'} : i))}
+                className={`p-2 rounded-xl transition-colors ${
+                  client.status === 'active' 
+                   ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' 
+                   : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                }`}
+             >
+                {client.status === 'active' ? <Lock size={18} /> : <Shield size={18} />}
+             </button>
+          </div>
+        </SurfaceCard>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-300 ${darkMode ? 'dark bg-neutral-900' : 'bg-[#f0f2f5]'}`}>
+      
+      {/* --- Navigation Rail (Desktop) --- */}
+      <aside className={`
+        hidden lg:flex flex-col items-center w-24 py-8 bg-white dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 z-20
+      `}>
+        <div className="mb-8 p-3 bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-200 dark:shadow-none">
+           <Activity size={28} />
+        </div>
+
+        <nav className="flex-1 flex flex-col gap-4 w-full px-2">
+           <IconButton 
+             icon={Activity} 
+             active={activeTab === 'dashboard'} 
+             onClick={() => setActiveTab('dashboard')} 
+           />
+           <IconButton 
+             icon={Users} 
+             active={activeTab === 'clients'} 
+             onClick={() => setActiveTab('clients')} 
+           />
+           <div className="w-8 h-[1px] bg-neutral-200 dark:bg-neutral-700 mx-auto my-2" />
+           <IconButton icon={Settings} />
+        </nav>
+
+        <div className="flex flex-col gap-4">
+           <IconButton 
+             icon={darkMode ? Moon : Sun} 
+             onClick={() => setDarkMode(!darkMode)} 
+             className="bg-neutral-100 dark:bg-neutral-700/50"
+           />
+           <div className="w-2 h-2 rounded-full bg-green-500 mx-auto" title="Server Online"></div>
+        </div>
+      </aside>
+
+      {/* --- Mobile Header --- */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-neutral-800/80 backdrop-blur-md z-30 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-700">
+         <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 text-white rounded-xl">
+               <Activity size={20} />
+            </div>
+            <span className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">TetherNet</span>
+         </div>
+         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-neutral-600 dark:text-neutral-300">
+            {sidebarOpen ? <X /> : <Menu />}
+         </button>
+      </div>
+
+      {/* --- Mobile Sidebar Drawer --- */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+           <aside className="absolute top-0 bottom-0 left-0 w-3/4 max-w-xs bg-white dark:bg-neutral-900 p-6 flex flex-col gap-2">
+              <h2 className="text-2xl font-bold mb-6 text-neutral-800 dark:text-white">Menu</h2>
+              <button onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} className={`flex items-center gap-4 p-4 rounded-2xl font-medium ${activeTab === 'dashboard' ? 'bg-blue-100 text-blue-800' : 'text-neutral-600 dark:text-neutral-300'}`}>
+                 <Activity /> Dashboard
+              </button>
+              <button onClick={() => { setActiveTab('clients'); setSidebarOpen(false); }} className={`flex items-center gap-4 p-4 rounded-2xl font-medium ${activeTab === 'clients' ? 'bg-blue-100 text-blue-800' : 'text-neutral-600 dark:text-neutral-300'}`}>
+                 <Users /> Clients
+              </button>
+              <button onClick={() => setDarkMode(!darkMode)} className="flex items-center gap-4 p-4 rounded-2xl font-medium text-neutral-600 dark:text-neutral-300 mt-auto bg-neutral-100 dark:bg-neutral-800">
+                 {darkMode ? <Moon /> : <Sun />} {darkMode ? 'Dark Mode' : 'Light Mode'}
+              </button>
+           </aside>
+        </div>
+      )}
+
+      {/* --- Main Content Area --- */}
+      <main className="flex-1 overflow-y-auto pt-20 pb-8 px-4 lg:pt-8 lg:px-8">
+         <div className="max-w-6xl mx-auto">
+            {/* Contextual Header */}
+            <div className="mb-8 flex justify-between items-end">
+              <div>
+                <h1 className="text-4xl font-normal text-neutral-900 dark:text-white tracking-tight capitalize">
+                   {activeTab === 'dashboard' ? 'Overview' : 'Device List'}
+                </h1>
+                <p className="text-neutral-500 dark:text-neutral-400 mt-2 font-light text-lg">
+                   {activeTab === 'dashboard' 
+                     ? `Uptime: ${formatUptime(uptime)} • Battery Impact: Low` 
+                     : `${clients.length} active connections found`}
+                </p>
+              </div>
+              
+              {/* Floating Action Button (FAB) Style Action */}
+              <button className="hidden md:flex items-center gap-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 px-6 py-3 rounded-2xl font-medium shadow-lg shadow-neutral-500/20 hover:scale-105 transition-transform">
+                 <Power size={20} />
+                 <span>Shutdown Server</span>
+              </button>
+            </div>
+
+            {/* Content Switcher */}
+            {activeTab === 'dashboard' && renderDashboard()}
+            {activeTab === 'clients' && renderClientList()}
+         </div>
+      </main>
+
+    </div>
+  );
+}
